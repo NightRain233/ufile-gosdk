@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -58,7 +59,7 @@ func (u *UFileRequest) MPut(filePath, keyName, mimeType string) error {
 		mimeType = getMimeType(file)
 	}
 
-	state, err := u.InitiateMultipartUpload(keyName, mimeType)
+	state, err := u.InitiateMultipartUpload(keyName, mimeType, nil)
 	if err != nil {
 		return err
 	}
@@ -87,12 +88,12 @@ func (u *UFileRequest) MPut(filePath, keyName, mimeType string) error {
 //keyName 表示传到 ufile 的文件名。
 //大于 100M 的文件推荐使用本接口上传。
 //同时并发上传的分片数量为10
-func (u *UFileRequest) AsyncMPut(filePath, keyName, mimeType string) error {
-	return u.AsyncUpload(filePath, keyName, mimeType, 10)
-}
+// func (u *UFileRequest) AsyncMPut(filePath, keyName, mimeType string) error {
+// 	return u.AsyncUpload(filePath, keyName, mimeType, 10)
+// }
 
 //AsyncUpload AsyncMPut 的升级版, jobs 表示同时并发的数量。
-func (u *UFileRequest) AsyncUpload(filePath, keyName, mimeType string, jobs int) error {
+func (u *UFileRequest) AsyncUpload(filePath, keyName, mimeType string, jobs int, c chan int) error {
 	if jobs <= 0 {
 		jobs = 1
 	}
@@ -110,19 +111,23 @@ func (u *UFileRequest) AsyncUpload(filePath, keyName, mimeType string, jobs int)
 		mimeType = getMimeType(file)
 	}
 
-	state, err := u.InitiateMultipartUpload(keyName, mimeType)
+	state, err := u.InitiateMultipartUpload(keyName, mimeType, c)
 	if err != nil {
 		return err
 	}
+
 	fsize := getFileSize(file)
+
 	chunkCount := divideCeil(fsize, int64(state.BlkSize)) //向上取整
+	log.Println(chunkCount, state.uploadID)
+
 	concurrentChan := make(chan error, jobs)
 	for i := 0; i != jobs; i++ {
 		concurrentChan <- nil
 	}
 
 	wg := &sync.WaitGroup{}
-	for i := 0; i != chunkCount; i++ {
+	for i := 0; i < chunkCount; i++ {
 		uploadErr := <-concurrentChan //最初允许启动 10 个 goroutine，超出10个后，有分片返回才会开新的goroutine.
 		if uploadErr != nil {
 			err = uploadErr
@@ -183,7 +188,7 @@ func (u *UFileRequest) AbortMultipartUpload(state *MultipartState) error {
 //keyName 表示传到 ufile 的文件名。
 //
 //mimeType 表示文件的 mimeType, 传空会报错，你可以使用 GetFileMimeType 方法检测文件的 mimeType。如果您上传的不是文件，您可以使用 http.DetectContentType https://golang.org/src/net/http/sniff.go?s=646:688#L11进行检测。
-func (u *UFileRequest) InitiateMultipartUpload(keyName, mimeType string) (*MultipartState, error) {
+func (u *UFileRequest) InitiateMultipartUpload(keyName, mimeType string, c chan int) (*MultipartState, error) {
 	reqURL := u.genFileURL(keyName) + "?uploads"
 	req, err := http.NewRequest("POST", reqURL, nil)
 	if err != nil {
@@ -206,8 +211,15 @@ func (u *UFileRequest) InitiateMultipartUpload(keyName, mimeType string) (*Multi
 	if err != nil {
 		return nil, err
 	}
+
+	log.Println("分片1：", string(u.LastResponseBody))
+	c <- 1
+
+	<-c
 	response := new(MultipartState)
 	err = json.Unmarshal(u.LastResponseBody, response)
+	log.Println("分片2：", string(u.LastResponseBody), response, err)
+
 	if err != nil {
 		return nil, err
 	}

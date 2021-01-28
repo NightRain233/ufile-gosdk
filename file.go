@@ -2,12 +2,13 @@ package ufsdk
 
 import (
 	"bytes"
-	"encoding/base64"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -195,7 +196,7 @@ func (u *UFileRequest) PostFile(filePath, keyName, mimeType string) (err error) 
 //mimeType 如果为空的，会调用 net/http 里面的 DetectContentType 进行检测。
 //keyName 表示传到 ufile 的文件名。
 //小于 100M 的文件推荐使用本接口上传。
-func (u *UFileRequest) PutFile(filePath, keyName, mimeType string) error {
+func (u *UFileRequest) PutFile(filePath, keyName, mimeType string, c chan int) error {
 	reqURL := u.genFileURL(keyName)
 	file, err := openFile(filePath)
 	if err != nil {
@@ -233,7 +234,12 @@ func (u *UFileRequest) PutFile(filePath, keyName, mimeType string) error {
 	fileSize := getFileSize(file)
 	req.Header.Add("Content-Length", strconv.FormatInt(fileSize, 10))
 
-	return u.request(req)
+	a := <-c
+	println(a)
+	err = u.request(req)
+	c <- 1
+	log.Println("put: ", u.LastResponseBody)
+	return err
 }
 
 //PutFileWithIopString 支持上传iop, 直接指定iop字符串, 上传iop必须指定saveAs命令做持久化，否则图片处理不会生效
@@ -325,7 +331,6 @@ func (u *UFileRequest) PutFileWithPolicy(filePath, keyName, mimeType string, pol
 	return u.request(req)
 }
 
-
 //DeleteFile 删除一个文件，如果删除成功 statuscode 会返回 204，否则会返回 404 表示文件不存在。
 //keyName 表示传到 ufile 的文件名。
 func (u *UFileRequest) DeleteFile(keyName string) error {
@@ -356,7 +361,7 @@ func (u *UFileRequest) HeadFile(keyName string) error {
 //prefix 表示匹配文件前缀。
 //marker 标志字符串
 //limit 列表数量限制，传 0 会默认设置为 20.
-func (u *UFileRequest) PrefixFileList(prefix, marker string, limit int) (list FileListResponse, err error) {
+func (u *UFileRequest) PrefixFileList(prefix, marker string, limit int, c chan int) (list FileListResponse, err error) {
 	query := &url.Values{}
 	query.Add("prefix", prefix)
 	query.Add("marker", marker)
@@ -374,7 +379,11 @@ func (u *UFileRequest) PrefixFileList(prefix, marker string, limit int) (list Fi
 	authorization := u.Auth.Authorization("GET", u.BucketName, "", req.Header)
 	req.Header.Add("authorization", authorization)
 
+	a := <-c
+	println(a)
 	err = u.request(req)
+	c <- 1
+	// log.Println("put: ", u.LastResponseBody)
 	if err != nil {
 		return
 	}
@@ -558,7 +567,7 @@ func (u *UFileRequest) Copy(dstkeyName, srcBucketName, srcKeyName string) (err e
 	if err != nil {
 		return err
 	}
-	req.Header.Add("X-Ufile-Copy-Source", "/" + srcBucketName + "/" + srcKeyName)
+	req.Header.Add("X-Ufile-Copy-Source", "/"+srcBucketName+"/"+srcKeyName)
 
 	authorization := u.Auth.Authorization("PUT", u.BucketName, dstkeyName, req.Header)
 	req.Header.Add("authorization", authorization)

@@ -53,7 +53,7 @@ func (u *UFileRequest) IOMutipartAsyncUpload(reader io.Reader, keyName, mimeType
 		err = errors.New("keyName cannot be empty")
 		return
 	}
-	state, err := u.InitiateMultipartUpload(keyName, mimeType)
+	state, err := u.InitiateMultipartUpload(keyName, mimeType, nil)
 	if err != nil {
 		return
 	}
