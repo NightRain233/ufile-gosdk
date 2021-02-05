@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
@@ -119,7 +120,7 @@ func (u *UFileRequest) AsyncUpload(filePath, keyName, mimeType string, jobs int,
 	fsize := getFileSize(file)
 
 	chunkCount := divideCeil(fsize, int64(state.BlkSize)) //向上取整
-	log.Println(chunkCount, state.uploadID)
+	log.Println("line:122", chunkCount, state.uploadID)
 
 	concurrentChan := make(chan error, jobs)
 	for i := 0; i != jobs; i++ {
@@ -127,7 +128,7 @@ func (u *UFileRequest) AsyncUpload(filePath, keyName, mimeType string, jobs int,
 	}
 
 	wg := &sync.WaitGroup{}
-	for i := 0; i < chunkCount; i++ {
+	for i := 0; i != chunkCount; i++ {
 		uploadErr := <-concurrentChan //最初允许启动 10 个 goroutine，超出10个后，有分片返回才会开新的goroutine.
 		if uploadErr != nil {
 			err = uploadErr
@@ -212,13 +213,13 @@ func (u *UFileRequest) InitiateMultipartUpload(keyName, mimeType string, c chan 
 		return nil, err
 	}
 
-	log.Println("分片1：", string(u.LastResponseBody))
+	// log.Println("分片1：", string(u.LastResponseBody))
 	c <- 1
 
 	<-c
 	response := new(MultipartState)
 	err = json.Unmarshal(u.LastResponseBody, response)
-	log.Println("分片2：", string(u.LastResponseBody), response, err)
+	// log.Println("分片2：", string(u.LastResponseBody), response, err)
 
 	if err != nil {
 		return nil, err
@@ -258,6 +259,20 @@ func (u *UFileRequest) UploadPart(buf *bytes.Buffer, state *MultipartState, part
 		return err
 	}
 	defer resp.Body.Close()
+	fmt.Println("header123")
+
+	if !VerifyHTTPCode(resp.StatusCode) {
+		log.Println("header")
+		log.Println(resp.Header)
+		resBody, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		// log.Println(string(resBody))
+
+		return fmt.Errorf("Remote response code is %d - %s %s",
+			resp.StatusCode, http.StatusText(resp.StatusCode), string(resBody))
+	}
 
 	etag := strings.Trim(resp.Header.Get("Etag"), "\"") //为保证线程安全，这里就不保留 lastResponse
 	if etag == "" {
